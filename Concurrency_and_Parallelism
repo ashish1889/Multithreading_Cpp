@@ -230,7 +230,9 @@ and identify areas for improvement. Remember that performance analysis is an ite
 techniques to find the best solution for your application.
 
 SpinLock - N/W Printer case
-
+Tightly coupled memory
+Locality of Reference(L1,L2 cache)
+Oversynchronization causes watchdog in Android.
 
 
 
