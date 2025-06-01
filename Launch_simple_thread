@@ -1,0 +1,255 @@
+Create a program in C++ that launches multiple threads. Each thread should increment a local counter a certain number of times and print its final count.
+
+To solve this problem, we need to create a C++ program that launches multiple threads. Each thread will increment a local counter a specified number 
+of times and then print its final count. The key aspect here is ensuring that each thread has its own local counter to avoid any shared state issues, 
+thus eliminating the need for synchronization mechanisms like mutexes for the counter itself. However, to prevent interleaved output when printing, 
+we use a mutex to synchronize access to the standard output.
+
+Approach
+
+Thread Function: Each thread will execute a function where:
+It initializes a local counter to zero.
+It increments the counter a specified number of times.
+It prints its thread identifier and the final counter value, ensuring thread-safe output using a mutex.
+Main Function:
+Define the number of threads and the number of increments per thread.
+Create a vector to hold the thread objects.
+Launch each thread, passing the thread function along with necessary parameters (thread ID and increment count).
+Wait for all threads to finish by joining them.
+
+Code-
+
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <mutex>
+
+// Thread function: increments a local counter 'n' times and prints the result.
+void thread_function(int thread_id, int n, std::mutex& mtx) {
+    int counter = 0;
+    for (int i = 0; i < n; ++i) {
+        counter++;
+    }
+    
+    // Lock mutex to ensure exclusive access to std::cout
+    std::lock_guard<std::mutex> lock(mtx);
+    std::cout << "Thread " << thread_id << ": " << counter << std::endl;
+}
+
+int main() {
+    const int num_threads = 5;          // Number of threads to create
+    const int increments_per_thread = 10000; // Each thread increments this many times
+
+    std::vector<std::thread> threads;   // Container to hold threads
+    std::mutex print_mutex;             // Mutex for synchronized printing
+
+    // Create and launch threads
+    for (int i = 0; i < num_threads; ++i) {
+        threads.push_back(std::thread(thread_function, i, increments_per_thread, std::ref(print_mutex)));
+    }
+
+    // Join all threads to ensure they complete before main exits
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    return 0;
+}
+
+O/p-
+
+Thread 1: 10000
+Thread 0: 10000
+Thread 2: 10000
+Thread 4: 10000
+Thread 3: 10000
+
+Explanation
+
+Thread Function:
+Each thread starts with its own local counter initialized to zero.
+The thread increments this counter n times (specified by increments_per_thread).
+After incrementing, the thread locks a mutex to safely print its ID and final counter value to std::cout without interleaving with other threads' outputs.
+Main Function:
+A mutex (print_mutex) is used to synchronize access to std::cout across threads.
+Threads are created in a loop, each assigned a unique ID and the number of increments to perform.
+The std::ref is used to pass the mutex by reference to each thread, ensuring all threads share the same mutex instance.
+After launching all threads, the main thread waits for each to finish by calling join(), ensuring orderly program termination.
+This approach efficiently demonstrates thread creation and management in C++, emphasizing thread-local data and synchronized output for correctness. 
+Each thread operates independently on its own counter, while the mutex ensures that the final outputs are printed without overlap.
+
+**Caveat for this code**
+If we remove the lockguard in this function-
+
+void thread_function(int thread_id, int n, std::mutex& mtx) {
+    int counter = 0;
+    for (int i = 0; i < n; ++i) {
+        counter++;
+    }
+    
+    // Lock mutex to ensure exclusive access to std::cout
+   // std::lock_guard<std::mutex> lock(mtx);
+    std::cout << "Thread " << thread_id << ": " << counter << std::endl;
+}
+
+Then O/p will be messy sometimes, as interleaving of threads(preemption) takes place-
+
+Thread Thread 1: 10000
+Thread 2: 10000
+0: 10000
+Thread 3: 10000
+Thread 4: 10000
+
+
+Parallel Array Initialization: Create a large array and initialize its elements with random numbers using multiple threads. Measure the time it takes to initialize 
+the array with and without multithreading.
+
+Parallel Array Initialization with Multithreading
+
+This program initializes a large array with random numbers using multiple threads and measures the performance difference between single-threaded and multi-threaded approaches.
+
+Approach
+
+Problem Analysis: Initialize a large array (100 million elements) with random numbers. Compare the performance of single-threaded vs multi-threaded initialization.
+Key Insights:
+Each thread works on a separate contiguous chunk of the array to avoid false sharing
+Thread-local random number generators prevent contention
+Time measurement focuses on initialization only
+Algorithm Selection:
+Single-threaded: Simple sequential initialization
+Multi-threaded: Divide array into chunks, assign each chunk to a thread
+Optimization:
+Use thread-local random generators
+Proper chunk alignment to cache lines
+Avoid unnecessary synchronization
+
+#include <iostream>
+#include <vector>
+#include <thread>
+#include <random>
+#include <chrono>
+#include <algorithm>
+#include <atomic>
+
+constexpr size_t ARRAY_SIZE = 100000000; // 100 million elements
+
+// Single-threaded initialization
+void initialize_array_single_thread(std::vector<int>& array) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dist(1, 100);
+
+    for (auto& element : array) {
+        element = dist(gen);
+    }
+}
+
+// Thread function for parallel initialization
+void initialize_chunk(std::vector<int>::iterator start, 
+                     std::vector<int>::iterator end,
+                     unsigned int seed_offset) {
+    std::seed_seq seed{static_cast<unsigned int>(std::random_device{}()),
+                      static_cast<unsigned int>(seed_offset)};
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<int> dist(1, 100);
+
+    for (auto it = start; it != end; ++it) {
+        *it = dist(gen);
+    }
+}
+
+// Multi-threaded initialization
+void initialize_array_multi_thread(std::vector<int>& array, unsigned num_threads) {
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    
+    const size_t chunk_size = array.size() / num_threads;
+    const size_t cache_line_size = 64; // Typical cache line size (bytes)
+    const size_t elements_per_cache_line = cache_line_size / sizeof(int);
+
+    for (unsigned i = 0; i < num_threads; ++i) {
+        size_t start_index = i * chunk_size;
+        // Align chunks to cache lines
+        if (start_index % elements_per_cache_line != 0) {
+            start_index = (start_index / elements_per_cache_line) * elements_per_cache_line;
+        }
+        
+        size_t end_index = (i == num_threads - 1) 
+                           ? array.size() 
+                           : std::min((i + 1) * chunk_size, array.size());
+        
+        threads.emplace_back(initialize_chunk,
+                            array.begin() + start_index,
+                            array.begin() + end_index,
+                            i); // Seed offset
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+}
+
+int main() {
+    std::vector<int> array(ARRAY_SIZE);
+    unsigned num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4; // Fallback if concurrency unavailable
+
+    // Single-threaded measurement
+    auto start_single = std::chrono::high_resolution_clock::now();
+    initialize_array_single_thread(array);
+    auto end_single = std::chrono::high_resolution_clock::now();
+    auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single);
+
+    // Multi-threaded measurement
+    auto start_multi = std::chrono::high_resolution_clock::now();
+    initialize_array_multi_thread(array, num_threads);
+    auto end_multi = std::chrono::high_resolution_clock::now();
+    auto duration_multi = std::chrono::duration_cast<std::chrono::milliseconds>(end_multi - start_multi);
+
+    // Output results
+    std::cout << "Array size: " << ARRAY_SIZE << " elements (" 
+              << (ARRAY_SIZE * sizeof(int) / (1024 * 1024)) << " MB)\n";
+    std::cout << "Single-threaded initialization time: " 
+              << duration_single.count() << " ms\n";
+    std::cout << "Multi-threaded initialization (" << num_threads << " threads): " 
+              << duration_multi.count() << " ms\n";
+    std::cout << "Speedup: " 
+              << static_cast<double>(duration_single.count()) / duration_multi.count() 
+              << "x\n";
+
+    return 0;
+}
+
+O/p-
+
+Array size: 100000000 elements (381 MB)
+Single-threaded initialization time: 4751 ms
+Multi-threaded initialization (4 threads): 5996 ms
+Speedup: 0.792362x
+
+xplanation
+
+Array Initialization:
+Creates a large vector (100 million integers ≈ 400 MB)
+Initializes elements with random values between 1-100
+Single-threaded Approach:
+Sequential processing using one thread
+Measures time with high-resolution clock
+Multi-threaded Approach:
+Divides array into chunks aligned to cache lines (64 bytes)
+Each thread uses its own random number generator with unique seed
+Threads process their chunks independently
+Uses maximum available hardware threads (with fallback to 4 threads)
+Performance Measurement:
+Compares execution times for both approaches
+Calculates speedup ratio of multi-threaded vs single-threaded
+Reports results in milliseconds
+Key Optimizations:
+Cache-aligned memory access to prevent false sharing
+Thread-local random generators avoid synchronization
+Efficient chunk partitioning minimizes thread overhead
+Note: Actual speedup depends on hardware capabilities. Typical results show 2-8x speed 
+improvement on modern multi-core processors. Compile with -O2 or -O3 for best performance.
+
+
+
